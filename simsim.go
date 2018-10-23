@@ -1,3 +1,17 @@
+// Copyright 2018 Axel Wagner
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 package main
 
 import (
@@ -15,6 +29,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"syscall"
 
 	"github.com/kr/pty"
@@ -29,6 +44,7 @@ func main() {
 }
 
 func run() error {
+	listen := flag.String("listen", "0.0.0.0:22", "Port to listen on")
 	flag.Parse()
 
 	cfg := ssh.ServerConfig{
@@ -39,7 +55,7 @@ func run() error {
 		return err
 	}
 
-	l, err := net.Listen("tcp", ":2222")
+	l, err := net.Listen("tcp", *listen)
 	if err != nil {
 		return err
 	}
@@ -120,9 +136,16 @@ func logAuth(md ssh.ConnMetadata, method string, err error) {
 }
 
 func checkPublicKey(md ssh.ConnMetadata, pub ssh.PublicKey) (*ssh.Permissions, error) {
-	u, err := lookupUser(md.User())
+	username := strings.ToLower(md.User())
+	for _, r := range username {
+		if r < 'a' || r > 'z' {
+			return nil, errors.New("invalid user name")
+		}
+	}
+
+	u, err := lookupUser(username)
 	if err != nil {
-		if _, err = createUser(md.User(), ssh.MarshalAuthorizedKey(pub)); err != nil {
+		if _, err = createUser(username); err != nil {
 			return nil, err
 		}
 		return permissions, nil
@@ -164,7 +187,7 @@ func serveConn(c net.Conn, cfg ssh.ServerConfig) {
 	}
 	defer sc.Close()
 
-	u, err := lookupUser(sc.User())
+	u, err := lookupUser(strings.ToLower(sc.User()))
 	if err != nil {
 		log.Println(err)
 		return
