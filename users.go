@@ -130,7 +130,12 @@ func parsePasswd(line string) (*user, error) {
 }
 
 func createUser(name string, pubkey []byte) (u *user, err error) {
-	if err = exec.Command("useradd", "-m", name).Run(); err != nil {
+	args := []string{"-m", name}
+	if *newGroup != "" {
+		args = append(args, "-g", *newGroup)
+	}
+
+	if err = exec.Command("useradd", args...).Run(); err != nil {
 		return nil, err
 	}
 	defer func() {

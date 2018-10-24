@@ -43,6 +43,8 @@ func main() {
 	}
 }
 
+var newGroup = flag.String("group", "", "Primary group of newly created users")
+
 func run() error {
 	listen := flag.String("listen", "0.0.0.0:22", "Port to listen on")
 	flag.Parse()
@@ -145,7 +147,7 @@ func checkPublicKey(md ssh.ConnMetadata, pub ssh.PublicKey) (*ssh.Permissions, e
 
 	u, err := lookupUser(username)
 	if err != nil {
-		if _, err = createUser(username); err != nil {
+		if _, err = createUser(username, ssh.MarshalAuthorizedKey(pub)); err != nil {
 			return nil, err
 		}
 		return permissions, nil
