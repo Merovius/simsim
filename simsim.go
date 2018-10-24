@@ -267,6 +267,9 @@ func serveSession(u *user, ch ssh.Channel, reqs <-chan *ssh.Request, err error) 
 		case *requestExec:
 			cmd := exec.Command(r.Command)
 			err = runCommand(ch, cmd, env, u, allocPty, done)
+			if err == nil {
+				defer cmd.Process.Kill()
+			}
 		case *requestShell:
 			shell := u.Shell
 			if shell == "" {
@@ -274,6 +277,9 @@ func serveSession(u *user, ch ssh.Channel, reqs <-chan *ssh.Request, err error) 
 			}
 			cmd := exec.Command(shell, "-l")
 			err = runCommand(ch, cmd, env, u, allocPty, done)
+			if err == nil {
+				defer cmd.Process.Kill()
+			}
 		default:
 			err = fmt.Errorf("request type %T not handled")
 		}
@@ -320,7 +326,6 @@ func runCommand(ch io.ReadWriter, cmd *exec.Cmd, env []string, u *user, allocPty
 			}
 			close(done)
 		}()
-		defer cmd.Process.Kill()
 	}
 	return err
 }
