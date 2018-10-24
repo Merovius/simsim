@@ -307,13 +307,14 @@ func runCommand(ch io.ReadWriter, cmd *exec.Cmd, env []string, u *user, allocPty
 		cmd.SysProcAttr.Credential.Groups = append(cmd.SysProcAttr.Credential.Groups, uint32(g.Gid))
 	}
 
-	var err error
+	var (
+		err    error
+		closer io.Closer
+	)
 	if allocPty != nil {
 		var f *os.File
 		f, err = pty.StartWithSize(cmd, &pty.Winsize{Rows: uint16(allocPty.Rows), Cols: uint16(allocPty.Columns), X: uint16(allocPty.Height), Y: uint16(allocPty.Width)})
-		if err == nil {
-			defer f.Close()
-		}
+		closer = f
 		go io.Copy(ch, f)
 		go io.Copy(f, ch)
 	} else {
@@ -324,6 +325,7 @@ func runCommand(ch io.ReadWriter, cmd *exec.Cmd, env []string, u *user, allocPty
 			if err := cmd.Wait(); err != nil {
 				log.Println(err)
 			}
+			closer.Close()
 			close(done)
 		}()
 	}
