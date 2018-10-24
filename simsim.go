@@ -284,7 +284,6 @@ func serveSession(u *user, ch ssh.Channel, reqs <-chan *ssh.Request, err error) 
 			err = fmt.Errorf("request type %T not handled")
 		}
 		if err != nil {
-			log.Println(err)
 			req.Reply(false, []byte(err.Error()))
 		} else if req.WantReply {
 			req.Reply(true, nil)
@@ -301,7 +300,6 @@ func runCommand(ch io.ReadWriter, cmd *exec.Cmd, env []string, u *user, allocPty
 			Gid: uint32(u.Gid),
 		},
 		Setsid:  true,
-		Setctty: true,
 	}
 	for _, g := range u.Groups {
 		cmd.SysProcAttr.Credential.Groups = append(cmd.SysProcAttr.Credential.Groups, uint32(g.Gid))
@@ -309,23 +307,46 @@ func runCommand(ch io.ReadWriter, cmd *exec.Cmd, env []string, u *user, allocPty
 
 	var (
 		err    error
-		closer io.Closer
+		closer func() error
 	)
 	if allocPty != nil {
 		var f *os.File
 		f, err = pty.StartWithSize(cmd, &pty.Winsize{Rows: uint16(allocPty.Rows), Cols: uint16(allocPty.Columns), X: uint16(allocPty.Height), Y: uint16(allocPty.Width)})
-		closer = f
+		closer = f.Close
 		go io.Copy(ch, f)
 		go io.Copy(f, ch)
 	} else {
+		stdin, e := cmd.StdinPipe()
+		if e != nil {
+			return err
+		}
+		stdout, e := cmd.StdoutPipe()
+		if e != nil {
+			return err
+		}
+		stderr, e := cmd.StderrPipe()
+		if e != nil {
+			return err
+		}
+		closer = func() error {
+			stdin.Close()
+			stdout.Close()
+			stderr.Close()
+			return nil
+		}
 		err = cmd.Start()
+		go io.Copy(stdin, ch)
+		go io.Copy(ch, stdout)
+		go io.Copy(ch, stderr)
 	}
 	if err == nil {
 		go func() {
 			if err := cmd.Wait(); err != nil {
 				log.Println(err)
 			}
-			closer.Close()
+			if closer != nil {
+				closer()
+			}
 			close(done)
 		}()
 	}
