@@ -265,7 +265,7 @@ func serveSession(u *user, ch ssh.Channel, reqs <-chan *ssh.Request, err error) 
 			allocPty = r
 			env = append(env, "TERM="+r.Term)
 		case *requestExec:
-			cmd := exec.Command(r.Command)
+			cmd := exec.Command("/bin/sh", "-c", r.Command)
 			err = runCommand(ch, cmd, env, u, allocPty, done)
 			if err == nil {
 				defer cmd.Process.Kill()
