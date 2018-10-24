@@ -264,46 +264,16 @@ func serveSession(u *user, ch ssh.Channel, reqs <-chan *ssh.Request, err error) 
 			}
 			allocPty = r
 			env = append(env, "TERM="+r.Term)
+		case *requestExec:
+			cmd := exec.Command(r.Command)
+			err = runCommand(ch, cmd, env, u, allocPty, done)
 		case *requestShell:
 			shell := u.Shell
 			if shell == "" {
 				shell = "/bin/bash"
 			}
 			cmd := exec.Command(shell, "-l")
-			cmd.Dir = u.HomeDir
-			cmd.Env = env
-			cmd.SysProcAttr = &syscall.SysProcAttr{
-				Credential: &syscall.Credential{
-					Uid: uint32(u.Uid),
-					Gid: uint32(u.Gid),
-				},
-				Setsid:  true,
-				Setctty: true,
-			}
-			for _, g := range u.Groups {
-				cmd.SysProcAttr.Credential.Groups = append(cmd.SysProcAttr.Credential.Groups, uint32(g.Gid))
-			}
-
-			if allocPty != nil {
-				var f *os.File
-				f, err = pty.StartWithSize(cmd, &pty.Winsize{Rows: uint16(allocPty.Rows), Cols: uint16(allocPty.Columns), X: uint16(allocPty.Height), Y: uint16(allocPty.Width)})
-				if err == nil {
-					defer f.Close()
-				}
-				go io.Copy(ch, f)
-				go io.Copy(f, ch)
-			} else {
-				err = cmd.Start()
-			}
-			if err == nil {
-				go func() {
-					if err := cmd.Wait(); err != nil {
-						log.Println(err)
-					}
-					close(done)
-				}()
-				defer cmd.Process.Kill()
-			}
+			err = runCommand(ch, cmd, env, u, allocPty, done)
 		default:
 			err = fmt.Errorf("request type %T not handled")
 		}
@@ -314,6 +284,45 @@ func serveSession(u *user, ch ssh.Channel, reqs <-chan *ssh.Request, err error) 
 			req.Reply(true, nil)
 		}
 	}
+}
+
+func runCommand(ch io.ReadWriter, cmd *exec.Cmd, env []string, u *user, allocPty *requestPTY, done chan struct{}) error {
+	cmd.Dir = u.HomeDir
+	cmd.Env = env
+	cmd.SysProcAttr = &syscall.SysProcAttr{
+		Credential: &syscall.Credential{
+			Uid: uint32(u.Uid),
+			Gid: uint32(u.Gid),
+		},
+		Setsid:  true,
+		Setctty: true,
+	}
+	for _, g := range u.Groups {
+		cmd.SysProcAttr.Credential.Groups = append(cmd.SysProcAttr.Credential.Groups, uint32(g.Gid))
+	}
+
+	var err error
+	if allocPty != nil {
+		var f *os.File
+		f, err = pty.StartWithSize(cmd, &pty.Winsize{Rows: uint16(allocPty.Rows), Cols: uint16(allocPty.Columns), X: uint16(allocPty.Height), Y: uint16(allocPty.Width)})
+		if err == nil {
+			defer f.Close()
+		}
+		go io.Copy(ch, f)
+		go io.Copy(f, ch)
+	} else {
+		err = cmd.Start()
+	}
+	if err == nil {
+		go func() {
+			if err := cmd.Wait(); err != nil {
+				log.Println(err)
+			}
+			close(done)
+		}()
+		defer cmd.Process.Kill()
+	}
+	return err
 }
 
 type requestPTY struct {
@@ -333,6 +342,10 @@ type requestEnv struct {
 type requestShell struct {
 }
 
+type requestExec struct {
+	Command string
+}
+
 func parseRequest(t string, b []byte) (interface{}, error) {
 	var r interface{}
 	switch t {
@@ -340,6 +353,8 @@ func parseRequest(t string, b []byte) (interface{}, error) {
 		r = new(requestPTY)
 	case "env":
 		r = new(requestEnv)
+	case "exec":
+		r = new(requestExec)
 	case "shell":
 		return new(requestShell), nil
 	default:
