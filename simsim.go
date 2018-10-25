@@ -38,6 +38,7 @@ import (
 )
 
 func main() {
+	log.SetFlags(log.LstdFlags | log.Lshortfile)
 	if err := run(); err != nil {
 		log.Fatal(err)
 	}
@@ -291,7 +292,7 @@ func serveSession(u *user, ch ssh.Channel, reqs <-chan *ssh.Request, err error) 
 	}
 }
 
-func runCommand(ch io.ReadWriter, cmd *exec.Cmd, env []string, u *user, allocPty *requestPTY, done chan struct{}) error {
+func runCommand(ch ssh.Channel, cmd *exec.Cmd, env []string, u *user, allocPty *requestPTY, done chan struct{}) error {
 	cmd.Dir = u.HomeDir
 	cmd.Env = env
 	cmd.SysProcAttr = &syscall.SysProcAttr{
@@ -299,7 +300,7 @@ func runCommand(ch io.ReadWriter, cmd *exec.Cmd, env []string, u *user, allocPty
 			Uid: uint32(u.Uid),
 			Gid: uint32(u.Gid),
 		},
-		Setsid:  true,
+		Setsid: true,
 	}
 	for _, g := range u.Groups {
 		cmd.SysProcAttr.Credential.Groups = append(cmd.SysProcAttr.Credential.Groups, uint32(g.Gid))
@@ -343,6 +344,10 @@ func runCommand(ch io.ReadWriter, cmd *exec.Cmd, env []string, u *user, allocPty
 		go func() {
 			if err := cmd.Wait(); err != nil {
 				log.Println(err)
+			}
+			if ws, ok := cmd.ProcessState.Sys().(syscall.WaitStatus); ok {
+				st := &struct{ Status uint32 }{uint32(ws.ExitStatus())}
+				ch.SendRequest("exit-status", false, ssh.Marshal(st))
 			}
 			if closer != nil {
 				closer()
