@@ -211,7 +211,11 @@ func serveConn(c net.Conn, cfg ssh.ServerConfig) {
 			default:
 				nch.Reject(ssh.UnknownChannelType, fmt.Sprintf("channel type %q not supported", nch.ChannelType()))
 			}
-		case req := <-reqs:
+		case req, ok := <-reqs:
+			if !ok {
+				log.Println("conn closed")
+				return
+			}
 			log.Printf("Request(%q, %v): %q", req.Type, req.WantReply, req.Payload)
 			if err := req.Reply(false, []byte(fmt.Sprintf("request type %q not supported", req.Type))); err != nil {
 				log.Println(err)
